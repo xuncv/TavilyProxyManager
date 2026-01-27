@@ -26,72 +26,97 @@
 
 ## 🛠️ 环境要求
 
-- **Go**: `1.23+`
-- **Node.js**: `20+`（仅用于前端 Web UI 构建）
-- **Docker**:（推荐部署方式）
+- **Docker / Docker Compose** (推荐部署方式，无需本地环境)
+- **Go**: `1.23+` & **Node.js**: `20+` (仅用于本地手动编译)
 
 ---
 
-## 🚦 快速开始 (开发环境)
+## 📦 快速部署 (Docker)
+
+直接使用 GHCR 镜像部署，**无需本地编译**。
+
+### 1. 使用 Docker Compose (推荐)
+
+创建 `docker-compose.yml` 文件：
+
+```yaml
+version: "3.8"
+services:
+  tavily-proxy:
+    image: ghcr.io/xuncv/tavilyproxymanager:latest
+    container_name: tavily-proxy
+    ports:
+      - "8080:8080"
+    environment:
+      - LISTEN_ADDR=:8080
+      - DATABASE_PATH=/app/data/proxy.db
+      - TAVILY_BASE_URL=https://api.tavily.com
+      - UPSTREAM_TIMEOUT=30s
+    volumes:
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+```
+
+执行启动：
+
+```bash
+docker-compose up -d
+```
+
+### 2. 使用 Docker 原生命令
+
+```bash
+docker run -d \
+  --name tavily-proxy \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  -e DATABASE_PATH=/app/data/proxy.db \
+  ghcr.io/xuncv/tavilyproxymanager:latest
+```
+
+---
+
+## 🔑 首次运行：获取 Master Key
+
+服务在**首次启动**时会自动生成一个随机的 **Master Key**，用于后续登录管理面板和调用 API。
+
+您可以通过以下命令查看控制台日志来获取它：
+
+```bash
+docker logs tavily-proxy 2>&1 | grep "master key"
+```
+
+**日志示例：**
+`level=INFO msg="no master key found, generated a new one" key=your_generated_master_key_here`
+
+> **提示**：建议首次登录后在管理面板或通过数据库备份妥善保存此 Key。
+
+---
+
+## 🛠️ 本地开发与手动编译
+
+如果您需要修改源码并自行构建：
 
 1.  **启动后端**:
-
     ```bash
     go run ./server
     ```
-
-    _首次启动会自动生成 Master Key，请查看控制台日志。_
-
-2.  **启动 frontend**:
+2.  **启动前端**:
     ```bash
-    cd web
-    npm install
-    npm run dev
+    cd web && npm install && npm run dev
     ```
-    访问 `http://localhost:5173`，按页面提示输入 Master Key。
 
----
+**手动编译二进制产物**:
 
-## 📦 部署说明
+- **Windows**: `.\scripts\build_all.ps1`
+- **Linux/macOS**: `./scripts/build_all.sh`
 
-### 1. 编译二进制
+**使用 Dockerfile 本地构建镜像**:
 
-使用项目自带脚本进行构建（需要安装 Go 和 Node.js，脚本会自动完成前端构建并内嵌）：
-
-- **Windows (PowerShell)**:
-  ```powershell
-  .\scripts\build_all.ps1
-  ```
-- **Linux/macOS (Bash)**:
-  ```bash
-  chmod +x ./scripts/build_all.sh
-  ./scripts/build_all.sh
-  ```
-  编译产物位于 `build/` 目录。
-
-### 2. Docker 部署 (推荐)
-
-项目提供多阶段构建的 `Dockerfile`，可自动完成前后端编译。
-
-#### 使用 Docker Compose 构建并运行
-
-1. 确保项目根目录下存在 `docker-compose.yml` 和 `Dockerfile`。
-2. 执行构建并启动：
-   ```bash
-   docker-compose up -d --build
-   ```
-
-#### 使用 Docker 原生命令构建并运行
 ```bash
-docker build -t tavily-proxy .
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  --name tavily-proxy \
-  tavily-proxy
+docker build -t my-tavily-proxy .
 ```
-
-> **注意**: 容器内部默认使用 `/app/data/proxy.db` 存储数据。请务必挂载该目录以实现数据持久化。对于 Windows/macOS 的 Docker Desktop 用户，建议手动设置环境变量 `TZ`（如 `TZ=Asia/Shanghai`）。
 
 ---
 
@@ -99,7 +124,7 @@ docker run -d \
 
 ### REST API 代理
 
-客户端调用方式与 Tavily 官方 API 完全一致，只需更改请求地址并使用 **Master Key**：
+客户端调用方式与 Tavily 官方 API 完全一致，只需将 API 地址替换为代理地址，并使用 **Master Key**：
 
 ```bash
 curl -X POST "http://localhost:8080/search" \
@@ -110,16 +135,14 @@ curl -X POST "http://localhost:8080/search" \
 
 **兼容性说明**:
 
-- **POST JSON**: 支持 `{"api_key": "<MASTER_KEY>"}` 或 `{"apiKey": "<MASTER_KEY>"}`。
-- **GET Query**: 支持 `?api_key=<MASTER_KEY>` 或 `?apiKey=<MASTER_KEY>`。
+- 支持 `{"api_key": "<MASTER_KEY>"}` 或 `{"apiKey": "<MASTER_KEY>"}`。
+- 支持 GET 参数 `?api_key=<MASTER_KEY>`。
 
 ### MCP (Model Context Protocol)
 
-服务在 `http://localhost:8080/mcp` 提供 Streamable HTTP MCP 端点。它暴露的工具与官方 `tavily-mcp` 一致（如 `tavily-search`）。
+服务在 `http://localhost:8080/mcp` 提供 HTTP MCP 端点。
 
-#### VS Code 配置示例
-
-在您的 MCP 配置文件中添加如下内容（配合 `mcp-remote` 使用）：
+#### VS Code 配置示例 (配合 mcp-remote)
 
 ```json
 {

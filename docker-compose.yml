@@ -2,8 +2,7 @@ version: "3.8"
 
 services:
   tavily-proxy:
-    build: .
-    container_name: tavily-proxy
+    image: ghcr.io/xuncv/tavilyproxymanager:main
     ports:
       - "8080:8080"
     environment:
