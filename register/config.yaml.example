@@ -1,0 +1,4 @@
+# 支持视觉的大模型
+OPENAI_BASEURL: https://example.com/v1
+OPENAI_API_KEY: key
+OPENAI_MODEL: gemini-3-flash

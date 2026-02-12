@@ -1,0 +1,13 @@
+[project]
+name = "tavily-register"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyaml>=25.7.0",
+    "pysocks>=1.7.1",
+    "requests>=2.32.5",
+    "reportlab>=4.4.9",
+    "svglib>=1.6.0",
+]
