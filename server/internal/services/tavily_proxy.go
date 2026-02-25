@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ type TavilyProxy struct {
 	client  *http.Client
 
 	settings *SettingsService
+	cache    *CacheService
 	keys     *KeyService
 	logs     *LogService
 	stats    *StatsService
@@ -67,6 +69,11 @@ func (p *TavilyProxy) WithSettings(settings *SettingsService) *TavilyProxy {
 	return p
 }
 
+func (p *TavilyProxy) WithCache(cache *CacheService) *TavilyProxy {
+	p.cache = cache
+	return p
+}
+
 func (p *TavilyProxy) isRequestLoggingEnabled(ctx context.Context) bool {
 	if p.settings == nil {
 		return true
@@ -88,6 +95,51 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 	requestBody, requestTruncated := "", false
 	if loggingEnabled && captureBodies && len(req.Body) > 0 {
 		requestBody, requestTruncated = truncateForLog(req.Body, maxLogBytes)
+	}
+
+	// Cache lookup for POST /search
+	noCache := false
+	if captureBodies && req.RawQuery != "" {
+		if vals, err := url.ParseQuery(req.RawQuery); err == nil {
+			noCache = strings.EqualFold(vals.Get("no_cache"), "true")
+			vals.Del("no_cache")
+			req.RawQuery = vals.Encode()
+		}
+	}
+
+	if captureBodies && !noCache && p.cache != nil && p.isCacheEnabled(ctx) {
+		cacheKey, query := p.cache.BuildCacheKey(req.Body)
+		if entry, hit, err := p.cache.Lookup(ctx, cacheKey); err == nil && hit {
+			createdAt := time.Now()
+			if loggingEnabled {
+				responseBody, responseTruncated := truncateForLog([]byte(entry.ResponseBody), maxLogBytes)
+				_ = p.logs.Create(ctx, &models.RequestLog{
+					RequestID:         proxyReqID,
+					KeyUsed:           0,
+					KeyAlias:          "",
+					Endpoint:          req.Path,
+					StatusCode:        entry.StatusCode,
+					LatencyMs:         0,
+					RequestBody:       requestBody,
+					RequestTruncated:  requestTruncated,
+					ResponseBody:      responseBody,
+					ResponseTruncated: responseTruncated,
+					CacheHit:          true,
+					ClientIP:          req.ClientIP,
+					CreatedAt:         createdAt,
+				})
+			}
+			if p.stats != nil {
+				_ = p.stats.RecordRequest(ctx, req.Path, createdAt)
+			}
+			p.logger.Info("cache hit", "query", query, "cache_key", cacheKey[:12])
+			return ProxyResponse{
+				StatusCode:     entry.StatusCode,
+				Headers:        http.Header{"Content-Type": {"application/json"}},
+				Body:           []byte(entry.ResponseBody),
+				ProxyRequestID: proxyReqID,
+			}, nil
+		}
 	}
 
 	candidates, err := p.keys.Candidates(ctx)
@@ -176,6 +228,15 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 		}
 		if p.stats != nil {
 			_ = p.stats.RecordRequest(ctx, req.Path, createdAt)
+		}
+
+		// Store in cache after successful upstream response
+		if captureBodies && status == http.StatusOK && p.cache != nil && p.isCacheEnabled(ctx) {
+			cacheKey, query := p.cache.BuildCacheKey(req.Body)
+			ttl := p.getCacheTTL(ctx)
+			if err := p.cache.Store(ctx, cacheKey, query, string(req.Body), string(resp.Body), status, ttl); err != nil {
+				p.logger.Warn("cache store failed", "err", err)
+			}
 		}
 
 		resp.ProxyRequestID = proxyReqID
@@ -302,6 +363,28 @@ func (e *UpstreamStatusError) Error() string {
 		return fmt.Sprintf("upstream status %d", e.StatusCode)
 	}
 	return fmt.Sprintf("upstream status %d: %s", e.StatusCode, body)
+}
+
+func (p *TavilyProxy) isCacheEnabled(ctx context.Context) bool {
+	if p.settings == nil {
+		return false
+	}
+	enabled, err := p.settings.GetBool(ctx, SettingCacheEnabled, false)
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+func (p *TavilyProxy) getCacheTTL(ctx context.Context) time.Duration {
+	if p.settings == nil {
+		return 43200 * time.Second
+	}
+	seconds, err := p.settings.GetInt(ctx, SettingCacheTTLSeconds, 43200)
+	if err != nil || seconds < 60 {
+		return 43200 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (p *TavilyProxy) GetUsage(ctx context.Context, tavilyKey string) (int, *int, error) {

@@ -37,6 +37,7 @@ export type LogItem = {
   request_truncated?: boolean
   response_body?: string | null
   response_truncated?: boolean
+  cache_hit?: boolean
   client_ip: string
   created_at: string
 }

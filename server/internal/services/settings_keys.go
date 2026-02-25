@@ -14,4 +14,7 @@ const (
 	SettingLogRetentionDays    = "log_retention_days"
 	SettingLogCleanupLastRunAt = "log_cleanup_last_run_at"
 	SettingLogCleanupLastError = "log_cleanup_last_error"
+
+	SettingCacheEnabled    = "cache_enabled"
+	SettingCacheTTLSeconds = "cache_ttl_seconds"
 )

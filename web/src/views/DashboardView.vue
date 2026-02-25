@@ -16,7 +16,7 @@
       </n-button>
     </div>
 
-    <n-grid cols="1 s:2 m:4" responsive="screen" :x-gap="12" :y-gap="12">
+    <n-grid cols="1 s:2 m:5" responsive="screen" :x-gap="12" :y-gap="12">
       <n-gi>
         <n-card size="small" class="stat-card">
           <n-statistic
@@ -66,6 +66,18 @@
           >
             <template #prefix>
               <n-icon :component="PulseOutline" color="#ef4444" />
+            </template>
+          </n-statistic>
+        </n-card>
+      </n-gi>
+      <n-gi>
+        <n-card size="small" class="stat-card">
+          <n-statistic
+            :label="t('dashboard.stats.cacheHits')"
+            :value="cacheStats?.total_hits ?? 0"
+          >
+            <template #prefix>
+              <n-icon :component="ServerOutline" color="#8b5cf6" />
             </template>
           </n-statistic>
         </n-card>
@@ -164,6 +176,7 @@ import {
   KeyOutline,
   PulseOutline,
   RefreshOutline,
+  ServerOutline,
 } from "@vicons/ionicons5";
 import { api } from "../api/client";
 import type { Stats, TimeSeries } from "../types";
@@ -177,6 +190,7 @@ const message = useMessage();
 const loadingStats = ref(false);
 const loadingChart = ref(false);
 const stats = ref<Stats | null>(null);
+const cacheStats = ref<{ enabled: boolean; entry_count: number; total_hits: number; total_size_bytes: number } | null>(null);
 const timeseries = ref<TimeSeries | null>(null);
 const granularity = ref<"hour" | "day" | "month">("hour");
 
@@ -194,8 +208,12 @@ const usagePercent = computed(() => {
 async function refreshStats() {
   loadingStats.value = true;
   try {
-    const { data } = await api.get<Stats>("/api/stats");
-    stats.value = data;
+    const [statsRes, cacheRes] = await Promise.all([
+      api.get<Stats>("/api/stats"),
+      api.get<{ enabled: boolean; entry_count: number; total_hits: number; total_size_bytes: number }>("/api/cache/stats"),
+    ]);
+    stats.value = statsRes.data;
+    cacheStats.value = cacheRes.data;
   } catch (err: any) {
     message.error(err?.response?.data?.error ?? t("dashboard.errors.loadStats"));
   } finally {

@@ -46,6 +46,8 @@ func main() {
 
 	tavilyProxy := services.NewTavilyProxy(cfg.TavilyBaseURL, cfg.UpstreamTimeout, keyService, logService, statsService, logger).
 		WithSettings(settingsService)
+	cacheService := services.NewCacheService(database, logger)
+	tavilyProxy.WithCache(cacheService)
 	quotaSyncService := services.NewQuotaSyncService(keyService, tavilyProxy, logger)
 	quotaSyncJob := services.NewQuotaSyncJobService(keyService, quotaSyncService, logger)
 
@@ -59,6 +61,7 @@ func main() {
 		QuotaSyncJob:     quotaSyncJob,
 		LogService:       logService,
 		StatsService:     statsService,
+		CacheService:     cacheService,
 		TavilyProxy:      tavilyProxy,
 		Logger:           logger,
 	})
@@ -69,6 +72,7 @@ func main() {
 	jobs.StartMonthlyReset(ctx, keyService, logger)
 	jobs.StartAutoQuotaSync(ctx, settingsService, quotaSyncService, logger)
 	jobs.StartLogCleanup(ctx, settingsService, logService, logger)
+	jobs.StartCacheCleanup(ctx, cacheService, logger)
 
 	go func() {
 		logger.Info("server listening", "addr", cfg.ListenAddr)
