@@ -195,6 +195,70 @@
           </n-space>
         </n-card>
       </n-gi>
+
+      <n-gi>
+        <n-card :title="t('settings.cache.title')" class="settings-card">
+          <template #header-extra>
+            <n-icon :component="ServerOutline" size="20" />
+          </template>
+          <n-space vertical size="large">
+            <n-form :model="cacheSettings" label-placement="top" size="medium">
+              <n-form-item :label="t('settings.cache.label')">
+                <n-space align="center">
+                  <n-switch v-model:value="cacheSettings.enabled" />
+                  <span>{{
+                    cacheSettings.enabled ? t("common.enabled") : t("common.disabled")
+                  }}</span>
+                </n-space>
+              </n-form-item>
+              <n-form-item :label="t('settings.cache.ttl')">
+                <n-input-number
+                  v-model:value="cacheSettings.ttl_seconds"
+                  :min="60"
+                  :max="604800"
+                  style="width: 100%"
+                >
+                  <template #suffix>{{ t("units.seconds") }}</template>
+                </n-input-number>
+              </n-form-item>
+            </n-form>
+
+            <div class="sync-stats">
+              <div class="sync-stat-item">
+                <span class="label">{{ t("settings.cache.entries") }}</span>
+                <span class="value">{{ cacheStatsData.entry_count }}</span>
+              </div>
+              <div class="sync-stat-item">
+                <span class="label">{{ t("settings.cache.hits") }}</span>
+                <span class="value">{{ cacheStatsData.total_hits }}</span>
+              </div>
+              <div class="sync-stat-item">
+                <span class="label">{{ t("settings.cache.size") }}</span>
+                <span class="value">{{ formatBytes(cacheStatsData.total_size_bytes) }}</span>
+              </div>
+            </div>
+
+            <n-popconfirm @positive-click="clearCache">
+              <template #trigger>
+                <n-button block type="error" secondary>
+                  <template #icon><n-icon :component="TrashOutline" /></template>
+                  {{ t("settings.cache.clear") }}
+                </n-button>
+              </template>
+              {{ t("settings.cache.clearConfirm") }}
+            </n-popconfirm>
+
+            <n-button
+              type="primary"
+              block
+              :loading="savingCache"
+              @click="saveCache"
+            >
+              {{ t("settings.cache.save") }}
+            </n-button>
+          </n-space>
+        </n-card>
+      </n-gi>
     </n-grid>
   </n-space>
 </template>
@@ -222,6 +286,7 @@ import {
   CopyOutline,
   LockClosedOutline,
   RefreshOutline,
+  ServerOutline,
   SyncOutline,
   TrashOutline,
 } from "@vicons/ionicons5";
@@ -233,6 +298,25 @@ const message = useMessage();
 const masterKey = ref("");
 const savingAutoSync = ref(false);
 const savingLogCleanup = ref(false);
+const savingCache = ref(false);
+
+const cacheSettings = ref<{
+  enabled: boolean;
+  ttl_seconds: number;
+}>({
+  enabled: false,
+  ttl_seconds: 43200,
+});
+
+const cacheStatsData = ref<{
+  entry_count: number;
+  total_hits: number;
+  total_size_bytes: number;
+}>({
+  entry_count: 0,
+  total_hits: 0,
+  total_size_bytes: 0,
+});
 
 const autoSync = ref<{
   enabled: boolean;
@@ -378,6 +462,60 @@ async function saveLogCleanup() {
   }
 }
 
+async function loadCache() {
+  try {
+    const [settingsRes, statsRes] = await Promise.all([
+      api.get<{ enabled: boolean; ttl_seconds: number }>("/api/settings/cache"),
+      api.get<{ entry_count: number; total_hits: number; total_size_bytes: number }>("/api/cache/stats"),
+    ]);
+    cacheSettings.value = {
+      enabled: settingsRes.data.enabled,
+      ttl_seconds: settingsRes.data.ttl_seconds,
+    };
+    cacheStatsData.value = {
+      entry_count: statsRes.data.entry_count,
+      total_hits: statsRes.data.total_hits,
+      total_size_bytes: statsRes.data.total_size_bytes,
+    };
+  } catch (err: any) {
+    message.error(err?.response?.data?.error ?? t("settings.errors.loadCache"));
+  }
+}
+
+async function saveCache() {
+  savingCache.value = true;
+  try {
+    await api.put("/api/settings/cache", {
+      enabled: cacheSettings.value.enabled,
+      ttl_seconds: cacheSettings.value.ttl_seconds,
+    });
+    await loadCache();
+    message.success(t("settings.messages.updated"));
+  } catch (err: any) {
+    message.error(err?.response?.data?.error ?? t("common.saveFailed"));
+  } finally {
+    savingCache.value = false;
+  }
+}
+
+async function clearCache() {
+  try {
+    await api.delete("/api/cache");
+    await loadCache();
+    message.success(t("settings.messages.updated"));
+  } catch (err: any) {
+    message.error(err?.response?.data?.error ?? t("common.deleteFailed"));
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, i);
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 async function copy() {
   try {
     await writeClipboardText(masterKey.value);
@@ -404,6 +542,7 @@ onMounted(async () => {
   await load();
   await loadAutoSync();
   await loadLogCleanup();
+  await loadCache();
 });
 </script>
 

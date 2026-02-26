@@ -20,6 +20,7 @@ type Dependencies struct {
 	QuotaSyncJob     *services.QuotaSyncJobService
 	LogService       *services.LogService
 	StatsService     *services.StatsService
+	CacheService     *services.CacheService
 	TavilyProxy      *services.TavilyProxy
 	Logger           *slog.Logger
 }

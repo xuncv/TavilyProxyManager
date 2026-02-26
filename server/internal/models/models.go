@@ -27,6 +27,7 @@ type RequestLog struct {
 	RequestTruncated  bool      `gorm:"not null;default:false" json:"request_truncated"`
 	ResponseBody      string    `gorm:"type:text" json:"response_body,omitempty"`
 	ResponseTruncated bool      `gorm:"not null;default:false" json:"response_truncated"`
+	CacheHit          bool      `gorm:"not null;default:false" json:"cache_hit"`
 	ClientIP          string    `json:"client_ip"`
 	CreatedAt         time.Time `gorm:"index" json:"created_at"`
 }
@@ -44,4 +45,16 @@ type Setting struct {
 	Key       string    `gorm:"primaryKey" json:"key"`
 	Value     string    `gorm:"not null" json:"value"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type SearchCache struct {
+	ID           uint      `gorm:"primaryKey"`
+	CacheKey     string    `gorm:"uniqueIndex;not null"`
+	Query        string    `gorm:"not null"`
+	RequestBody  string    `gorm:"type:text;not null"`
+	ResponseBody string    `gorm:"type:text;not null"`
+	StatusCode   int       `gorm:"not null"`
+	HitCount     int64     `gorm:"not null;default:0"`
+	ExpiresAt    time.Time `gorm:"index;not null"`
+	CreatedAt    time.Time `gorm:"not null"`
 }

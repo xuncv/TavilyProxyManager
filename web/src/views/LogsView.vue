@@ -386,24 +386,43 @@ const columns: DataTableColumns<LogItem> = [
   {
     title: () => t("logs.table.status"),
     key: "status_code",
-    width: 100,
+    width: 140,
     align: "center",
-    render: (r) =>
-      h(
-        NTag,
-        {
-          type:
-            r.status_code === 200
-              ? "success"
-              : r.status_code === 0
-                ? "warning"
-                : "error",
-          size: "small",
-          round: true,
-          bordered: false,
-        },
-        { default: () => String(r.status_code) },
-      ),
+    render: (r) => {
+      const tags = [
+        h(
+          NTag,
+          {
+            type:
+              r.status_code === 200
+                ? "success"
+                : r.status_code === 0
+                  ? "warning"
+                  : "error",
+            size: "small",
+            round: true,
+            bordered: false,
+          },
+          { default: () => String(r.status_code) },
+        ),
+      ];
+      if (r.cache_hit) {
+        tags.push(
+          h(
+            NTag,
+            {
+              type: "info",
+              size: "small",
+              round: true,
+              bordered: false,
+              style: "margin-left: 4px",
+            },
+            { default: () => t("logs.table.cacheHit") },
+          ),
+        );
+      }
+      return h("span", {}, tags);
+    },
   },
   {
     title: () => t("logs.table.actions"),
