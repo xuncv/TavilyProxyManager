@@ -13,6 +13,8 @@ type Config struct {
 	UpstreamTimeout time.Duration
 	MCPStateless    bool
 	MCPSessionTTL   time.Duration
+	LogDir          string // log file directory; empty = stdout only
+	LogLevel        string // debug/info/warn/error
 }
 
 func FromEnv() Config {
@@ -27,6 +29,8 @@ func FromEnv() Config {
 	timeout := getenvDuration("UPSTREAM_TIMEOUT", 150*time.Second)
 	mcpStateless := getenvBool("MCP_STATELESS", true)
 	mcpSessionTTL := getenvDuration("MCP_SESSION_TTL", 10*time.Minute)
+	logDir := getenv("LOG_DIR", "")
+	logLevel := getenv("LOG_LEVEL", "info")
 
 	return Config{
 		ListenAddr:      listenAddr,
@@ -35,6 +39,8 @@ func FromEnv() Config {
 		UpstreamTimeout: timeout,
 		MCPStateless:    mcpStateless,
 		MCPSessionTTL:   mcpSessionTTL,
+		LogDir:          logDir,
+		LogLevel:        logLevel,
 	}
 }
 

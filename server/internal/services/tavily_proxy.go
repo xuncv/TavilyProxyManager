@@ -89,6 +89,14 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 	const maxLogBytes = 32 * 1024
 
 	proxyReqID := uuid.NewString()
+	startTime := time.Now()
+
+	p.logger.Info("proxy request started",
+		"request_id", proxyReqID,
+		"method", req.Method,
+		"path", req.Path,
+		"client_ip", req.ClientIP,
+	)
 
 	loggingEnabled := p.logs != nil && p.isRequestLoggingEnabled(ctx)
 	captureBodies := strings.EqualFold(req.Method, http.MethodPost) && req.Path == "/search"
@@ -148,6 +156,10 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 	}
 
 	if len(candidates) == 0 {
+		p.logger.Warn("no available keys",
+			"request_id", proxyReqID,
+			"path", req.Path,
+		)
 		if captureBodies {
 			createdAt := time.Now()
 			if loggingEnabled {
@@ -178,15 +190,32 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 		resp, status, latencyMs, tavilyReqID, err := p.tryKey(ctx, key.ID, key.Key, req, proxyReqID)
 
 		if err != nil {
+			p.logger.Warn("upstream request failed",
+				"request_id", proxyReqID,
+				"key_id", key.ID,
+				"key_alias", key.Alias,
+				"err", err,
+			)
 			lastErr = err
 			continue
 		}
 
 		switch status {
 		case http.StatusUnauthorized:
+			p.logger.Warn("key marked invalid",
+				"request_id", proxyReqID,
+				"key_id", key.ID,
+				"key_alias", key.Alias,
+			)
 			_ = p.keys.MarkInvalid(ctx, key.ID)
 			continue
 		case http.StatusTooManyRequests, 432, 433:
+			p.logger.Warn("key quota exhausted",
+				"request_id", proxyReqID,
+				"key_id", key.ID,
+				"key_alias", key.Alias,
+				"status", status,
+			)
 			_ = p.keys.MarkExhausted(ctx, key.ID)
 			continue
 		}
@@ -241,10 +270,21 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 
 		resp.ProxyRequestID = proxyReqID
 		resp.TavilyRequestID = tavilyReqID
+		p.logger.Info("proxy request completed",
+			"request_id", proxyReqID,
+			"key_id", key.ID,
+			"status", status,
+			"latency_ms", time.Since(startTime).Milliseconds(),
+		)
 		return resp, nil
 	}
 
 	if captureBodies && lastErr != nil {
+		p.logger.Error("all keys exhausted",
+			"request_id", proxyReqID,
+			"path", req.Path,
+			"last_err", lastErr,
+		)
 		createdAt := time.Now()
 		if loggingEnabled {
 			_ = p.logs.Create(ctx, &models.RequestLog{
@@ -265,6 +305,11 @@ func (p *TavilyProxy) Do(ctx context.Context, req ProxyRequest) (ProxyResponse, 
 		if p.stats != nil {
 			_ = p.stats.RecordRequest(ctx, req.Path, createdAt)
 		}
+	} else if lastErr == nil {
+		p.logger.Error("all keys exhausted",
+			"request_id", proxyReqID,
+			"path", req.Path,
+		)
 	}
 
 	return ProxyResponse{}, ErrNoAvailableKeys
@@ -278,12 +323,12 @@ func truncateForLog(data []byte, maxBytes int) (string, bool) {
 }
 
 func (p *TavilyProxy) tryKey(ctx context.Context, keyID uint, tavilyKey string, req ProxyRequest, proxyReqID string) (ProxyResponse, int, int64, string, error) {
-	url := p.baseURL + req.Path
+	targetURL := p.baseURL + req.Path
 	if req.RawQuery != "" {
-		url += "?" + req.RawQuery
+		targetURL += "?" + req.RawQuery
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(ctx, req.Method, url, bytes.NewReader(req.Body))
+	upstreamReq, err := http.NewRequestWithContext(ctx, req.Method, targetURL, bytes.NewReader(req.Body))
 	if err != nil {
 		return ProxyResponse{}, 0, 0, "", err
 	}
@@ -296,16 +341,43 @@ func (p *TavilyProxy) tryKey(ctx context.Context, keyID uint, tavilyKey string, 
 	}
 	upstreamReq.Header.Set("X-Proxy-Request-Id", proxyReqID)
 
+	p.logger.Debug("sending upstream request",
+		"request_id", proxyReqID,
+		"method", req.Method,
+		"url", targetURL,
+		"key_id", keyID,
+	)
+
 	start := time.Now()
 	upstreamResp, err := p.client.Do(upstreamReq)
 	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
+		p.logger.Warn("upstream call error",
+			"request_id", proxyReqID,
+			"url", targetURL,
+			"key_id", keyID,
+			"latency_ms", latencyMs,
+			"err", err,
+		)
 		return ProxyResponse{}, 0, latencyMs, "", err
 	}
 	defer upstreamResp.Body.Close()
 
+	p.logger.Debug("upstream response received",
+		"request_id", proxyReqID,
+		"status", upstreamResp.StatusCode,
+		"latency_ms", latencyMs,
+		"key_id", keyID,
+	)
+
 	body, err := io.ReadAll(upstreamResp.Body)
 	if err != nil {
+		p.logger.Warn("upstream response read error",
+			"request_id", proxyReqID,
+			"key_id", keyID,
+			"status", upstreamResp.StatusCode,
+			"err", err,
+		)
 		return ProxyResponse{}, upstreamResp.StatusCode, latencyMs, "", err
 	}
 
@@ -396,6 +468,7 @@ func (p *TavilyProxy) GetUsage(ctx context.Context, tavilyKey string) (int, *int
 
 	resp, err := p.client.Do(req)
 	if err != nil {
+		p.logger.Warn("upstream usage request failed", "err", err)
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
