@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -22,12 +21,12 @@ func NewSettingsService(db *gorm.DB) *SettingsService {
 
 func (s *SettingsService) Get(ctx context.Context, key string) (string, bool, error) {
 	var setting models.Setting
-	err := s.db.WithContext(ctx).First(&setting, "key = ?", key).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", false, nil
-		}
-		return "", false, err
+	tx := s.db.WithContext(ctx).Where("key = ?", key).Limit(1).Find(&setting)
+	if tx.Error != nil {
+		return "", false, tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return "", false, nil
 	}
 	return setting.Value, true, nil
 }
